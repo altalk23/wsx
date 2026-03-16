@@ -2,7 +2,6 @@
 #include <wsx/Internal.hpp>
 
 #ifdef WSX_ENABLE_ASYNC
-#include <xtls/AsyncTlsSocket.hpp>
 #include <arc/net/TcpStream.hpp>
 
 using arc::Future;

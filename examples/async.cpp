@@ -1,3 +1,4 @@
+#ifdef WSX_ENABLE_ASYNC
 
 #include <wsx/AsyncClient.hpp>
 #include <arc/prelude.hpp>
@@ -45,3 +46,14 @@ Future<Result<>> asyncMain(int argc, const char** argv) {
 }
 
 ARC_DEFINE_MAIN(asyncMain);
+
+#else
+
+#include <print>
+
+int main() {
+    std::println("This example requires wsx to be built with async support.");
+    return 1;
+}
+
+#endif

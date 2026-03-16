@@ -59,11 +59,11 @@ CPMAddPackage(
 
 If the static wolfSSL option does not suffice, you can use the [xtls](https://github.com/dankmeme01/xtls) library and manually choose between one of the built-in backends (such as OpenSSL or wolfSSL), or implement your own backend with a different TLS library.
 
-Here's an example of how you could build this library using OpenSSL for TLS. Unlike the wolfSSL example, this uses `find_package` to find OpenSSL in your system, instead of building it, which may cause issues when cross-compiling.
+Here's an example of how you could build this library using OpenSSL for TLS. Unlike the wolfSSL example, this uses `find_package` to find OpenSSL in your system. This means you likely will need to specify `OPENSSL_ROOT_DIR` when cross compiling.
 
 ```cmake
 CPMAddPackage(
-    URI "gh:dankmeme01/xtls#228eebd"
+    URI "gh:dankmeme01/xtls#063cf60"
     OPTIONS "XTLS_ENABLE_OPENSSL ON"
 )
 

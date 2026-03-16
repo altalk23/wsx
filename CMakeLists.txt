@@ -64,7 +64,7 @@ endif()
 # Add xtls if not already added
 if (WSX_ENABLE_TLS AND NOT TARGET xtls)
     CPMAddPackage(
-        URI "gh:dankmeme01/xtls#228eebd"
+        URI "gh:dankmeme01/xtls#063cf60"
         OPTIONS
             "XTLS_ENABLE_WOLFSSL ${WSX_BUILD_WOLFSSL}"
             "XTLS_ENABLE_SOCKET ON"
@@ -78,7 +78,7 @@ if (WSX_ENABLE_TLS)
     target_compile_definitions(wsx PUBLIC WSX_ENABLE_TLS)
 endif()
 
-# Link required dependencies (Result, qsox, base64)
+# Link required dependencies (Result, qsox, base64, fmt)
 if (NOT TARGET GeodeResult)
     CPMAddPackage("gh:geode-sdk/result@1.4.1")
 endif()
@@ -91,7 +91,10 @@ if (NOT TARGET base64)
         OPTIONS "BASE64_ENABLE_TESTING OFF"
     )
 endif()
-target_link_libraries(wsx PUBLIC GeodeResult qsox base64)
+if (NOT TARGET fmt)
+    CPMAddPackage("gh:fmtlib/fmt#12.1.0")
+endif()
+target_link_libraries(wsx PUBLIC GeodeResult qsox base64 fmt)
 
 # Bundle CA certificates
 if (WSX_BUNDLE_CACERTS)

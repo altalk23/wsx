@@ -4,6 +4,8 @@
 #include <Geode/Result.hpp>
 #include <qsox/SocketAddress.hpp>
 #include <qsox/TcpStream.hpp>
+#include <memory>
+#include <fmt/format.h>
 
 #ifdef WSX_ENABLE_TLS
 # include <xtls/xtls.hpp>

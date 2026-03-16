@@ -1,3 +1,5 @@
+#ifdef WSX_ENABLE_ASYNC
+
 #include <wsx/AsyncClient.hpp>
 #include "UrlParser.hpp"
 #include "AsyncTransports.hpp"
@@ -196,3 +198,5 @@ Future<Result<>> AsyncClient::sendCloseFrame(uint16_t code, std::string_view rea
 }
 
 }
+
+#endif
