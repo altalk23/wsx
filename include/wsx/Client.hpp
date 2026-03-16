@@ -46,8 +46,8 @@ public:
     Result<void> flush();
 
     /// Receives a message from the server, blocking until data is available.
-    /// If this returns an error, the error is fatal and the client will be disconnected.
-    /// All future sends and recv calls will fail.
+    /// If this returns an error, the error is fatal and the client will be disconnected. All future sends and recv calls will fail.
+    /// If this returns a close message, the client will be disconnected. There is no need to send a close frame back, the library does it for you.
     Result<Message> recv();
 
     /// Closes the connection. All future sends and recv calls will fail.
@@ -56,6 +56,11 @@ public:
 
     /// Closes the connection without waiting for an acknowledgment from the server.
     Result<> closeNoAck(uint16_t code = 1000, std::string_view reason = "");
+
+    /// Returns whether a connection is still active
+    bool isConnected() const {
+        return m_transport != nullptr;
+    }
 
 protected:
     std::unique_ptr<WsTransport> m_transport;

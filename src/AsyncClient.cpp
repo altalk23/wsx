@@ -152,7 +152,14 @@ Future<Result<Message>> AsyncClient::recv() {
         }
 
         auto opt = std::move(res).unwrap();
-        if (opt) co_return Ok(std::move(*opt));
+        if (opt) {
+            if (opt->isClose()) {
+                GEODE_CO_UNWRAP(co_await this->sendCloseFrame(1000, ""));
+                m_transport.reset();
+            }
+
+            co_return Ok(std::move(*opt));
+        }
 
         // read from the socket
         auto wnd = this->rwindow(4096);

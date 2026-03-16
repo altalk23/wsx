@@ -144,7 +144,14 @@ Result<Message> Client::recv() {
         }
 
         auto opt = std::move(res).unwrap();
-        if (opt) return Ok(std::move(*opt));
+        if (opt) {
+            if (opt->isClose()) {
+                GEODE_UNWRAP(this->sendCloseFrame(1000, ""));
+                m_transport.reset();
+            }
+
+            return Ok(std::move(*opt));
+        }
 
         // read from the socket
         auto wnd = this->rwindow(4096);

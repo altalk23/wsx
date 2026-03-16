@@ -39,6 +39,25 @@ std::string ClientBase::generateRequest(uint8_t(&nonce)[16], const ClientConnect
     wsx::_genrandom(nonce, 16);
     auto encodedKey = nonceToKey(nonce);
 
+    std::string hostname{options.hostname.empty() ? "localhost" : options.hostname};
+
+    // if the port is non-standard, it must be included in the host header
+    bool isStandard =
+        options.address.port() == 0  // automatic
+#ifdef WSX_ENABLE_TLS
+        // tls connection to :443
+        || (options.tlsContext && options.address.port() == 443)
+        // non-tls connection to :80
+        || (!options.tlsContext && options.address.port() == 80);
+#else
+        // non-tls connection to :80
+        || options.address.port() == 80;
+#endif
+
+    if (!isStandard) {
+        hostname += fmt::format(":{}", options.address.port());
+    }
+
     std::string req =  fmt::format(
         "GET {} HTTP/1.1\r\n"
         "Host: {}\r\n"
@@ -47,7 +66,7 @@ std::string ClientBase::generateRequest(uint8_t(&nonce)[16], const ClientConnect
         "Sec-WebSocket-Key: {}\r\n"
         "Sec-WebSocket-Version: 13\r\n",
         options.path.empty() ? "/" : options.path,
-        options.hostname.empty() ? "localhost" : options.hostname,
+        hostname,
         encodedKey
     );
 
