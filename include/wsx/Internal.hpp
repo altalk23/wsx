@@ -51,6 +51,11 @@ struct ClientConnectOptions {
 #ifdef WSX_ENABLE_TLS
     std::shared_ptr<xtls::Context> tlsContext;
 #endif
+
+    /// Parses the given URL and extracts path, hostname and address into this struct.
+    /// This function is blocking because it may need to resolve DNS, so it should not be called in async context directly.
+    /// This populates all fields except headers, so setting a TLS context is also not necessary.
+    static Result<ClientConnectOptions> fromUrl(std::string_view url);
 };
 
 class ClientBase {

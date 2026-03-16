@@ -1,46 +1,10 @@
 #include <wsx/Client.hpp>
-#include "UrlParser.hpp"
 #include "SyncTransports.hpp"
-
-#include <qsox/Resolver.hpp>
 
 namespace wsx {
 
 Result<Client> Client::connect(std::string_view url) {
-    GEODE_UNWRAP_INTO(auto parts, wsx::parseUrl(url));
-
-    auto addr = qsox::SocketAddress::any();
-    addr.setPort(parts.port);
-
-    // resolve hostname if needed
-    if (parts.ip) {
-        addr.setAddress(*parts.ip);
-    } else {
-        if (parts.hostname.empty()) {
-            return Err("URL must contain a hostname or IP address");
-        }
-        auto result = qsox::resolver::resolve(std::string{parts.hostname});
-        if (!result) {
-            return Err(fmt::format("Could not resolve host '{}': {}", parts.hostname, result.unwrapErr()));
-        }
-
-        addr.setAddress(result.unwrap());
-    }
-
-    ClientConnectOptions opts {
-        .path = parts.path,
-        .hostname = parts.hostname,
-        .address = addr,
-    };
-
-    if (parts.tls) {
-#ifdef WSX_ENABLE_TLS
-        GEODE_UNWRAP_INTO(opts.tlsContext, createContext());
-#else
-        return Err("wsx was not built with TLS support, cannot connect to wss:// URLs");
-#endif
-    }
-
+    GEODE_UNWRAP_INTO(auto opts, ClientConnectOptions::fromUrl(url));
     return connect(opts);
 }
 

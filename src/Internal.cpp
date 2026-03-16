@@ -1,4 +1,7 @@
 #include <wsx/Internal.hpp>
+#include "UrlParser.hpp"
+
+#include <qsox/Resolver.hpp>
 #include <random>
 #include <base64.hpp>
 #include "sha1.hpp"
@@ -12,6 +15,43 @@ namespace wsx {
 
 ClientBase::ClientBase() {}
 ClientBase::~ClientBase() {}
+
+Result<ClientConnectOptions> ClientConnectOptions::fromUrl(std::string_view url) {
+    GEODE_UNWRAP_INTO(auto parts, wsx::parseUrl(url));
+
+    auto addr = qsox::SocketAddress::any();
+    addr.setPort(parts.port);
+
+    // resolve hostname if needed
+    if (parts.ip) {
+        addr.setAddress(*parts.ip);
+    } else {
+        if (parts.hostname.empty()) {
+            return Err("URL must contain a hostname or IP address");
+        }
+        auto result = qsox::resolver::resolve(std::string{parts.hostname});
+        if (!result) {
+            return Err(fmt::format("Could not resolve host '{}': {}", parts.hostname, result.unwrapErr()));
+        }
+
+        addr.setAddress(result.unwrap());
+    }
+
+    ClientConnectOptions opts {
+        .path = parts.path,
+        .hostname = parts.hostname,
+        .address = addr,
+    };
+    if (parts.tls) {
+#ifdef WSX_ENABLE_TLS
+        GEODE_UNWRAP_INTO(opts.tlsContext, createContext());
+#else
+        return Err("wsx was not built with TLS support, cannot connect to wss:// URLs");
+#endif
+    }
+
+    return Ok(std::move(opts));
+}
 
 static bool equalsIgnoreCase(std::string_view a, std::string_view b) {
     return std::equal(a.begin(), a.end(), b.begin(), b.end(), [](auto c1, auto c2) {

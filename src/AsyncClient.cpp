@@ -1,54 +1,18 @@
 #ifdef WSX_ENABLE_ASYNC
 
 #include <wsx/AsyncClient.hpp>
-#include "UrlParser.hpp"
 #include "AsyncTransports.hpp"
-
-#include <qsox/Resolver.hpp>
 
 using namespace arc;
 
 namespace wsx {
 
 Future<Result<AsyncClient>> AsyncClient::connect(std::string_view url) {
-    GEODE_CO_UNWRAP_INTO(auto parts, wsx::parseUrl(url));
+    auto res = co_await arc::spawnBlocking<Result<ClientConnectOptions>>([url] {
+        return ClientConnectOptions::fromUrl(url);
+    });
 
-    auto addr = qsox::SocketAddress::any();
-    addr.setPort(parts.port);
-
-    // resolve hostname if needed
-    if (parts.ip) {
-        addr.setAddress(*parts.ip);
-    } else {
-        if (parts.hostname.empty()) {
-            co_return Err("URL must contain a hostname or IP address");
-        }
-
-        auto result = co_await arc::spawnBlocking<qsox::resolver::Result<qsox::IpAddress>>([hostname = std::string{parts.hostname}] {
-            return qsox::resolver::resolve(hostname);
-        });
-
-        if (!result) {
-            co_return Err(fmt::format("Could not resolve host '{}': {}", parts.hostname, result.unwrapErr()));
-        }
-
-        addr.setAddress(result.unwrap());
-    }
-
-    ClientConnectOptions opts {
-        .path = parts.path,
-        .hostname = parts.hostname,
-        .address = addr,
-    };
-
-    if (parts.tls) {
-#ifdef WSX_ENABLE_TLS
-        GEODE_CO_UNWRAP_INTO(opts.tlsContext, createContext());
-#else
-        co_return Err("wsx was not built with TLS support, cannot connect to wss:// URLs");
-#endif
-    }
-
+    GEODE_CO_UNWRAP_INTO(auto opts, res);
     co_return co_await connect(opts);
 }
 
