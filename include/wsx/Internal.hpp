@@ -57,6 +57,10 @@ protected:
     qn::CircularByteBuffer m_wbuf;
     std::vector<Message> m_fragments;
 
+    // maybe make this configurable later?
+    static constexpr size_t MAX_BUFFER_SIZE = 128 * 1024 * 1024;
+    static constexpr size_t MAX_HANDSHAKE_SIZE = 512 * 1024;
+
     ClientBase();
     ~ClientBase();
 
@@ -67,6 +71,10 @@ protected:
 
     static std::string generateRequest(uint8_t(&nonce)[16], const ClientConnectOptions& options);
     static Result<ParsedHttpResponse> parseResponse(uint8_t(&nonce)[16], std::string_view response);
+    static Message makeCloseFrame(uint16_t code, std::string_view reason);
+
+    Result<std::optional<Message>> readFromBuffer();
+    std::span<uint8_t> rwindow(size_t atLeast);
 };
 
 #ifdef WSX_ENABLE_TLS

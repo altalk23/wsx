@@ -149,6 +149,43 @@ Result<ParsedHttpResponse> ClientBase::parseResponse(uint8_t(&nonce)[16], std::s
     return Ok(std::move(out));
 }
 
+Message ClientBase::makeCloseFrame(uint16_t code, std::string_view reason) {
+    if (reason.size() > 123) {
+        reason = reason.substr(0, 123);
+    }
+
+    std::vector<uint8_t> payload(2 + reason.size());
+    payload[0] = (code >> 8) & 0xFF;
+    payload[1] = code & 0xFF;
+    std::memcpy(payload.data() + 2, reason.data(), reason.size());
+
+    return Message(Message::Type::Close, std::move(payload));
+}
+
+Result<std::optional<Message>> ClientBase::readFromBuffer() {
+    auto res1 = _readAndReassembleMessage(m_rbuf, m_fragments);
+    if (!res1) {
+        return Err(std::move(res1).unwrapErr());
+    }
+
+    return Ok(std::move(res1).unwrap());
+}
+
+std::span<uint8_t> ClientBase::rwindow(size_t atLeast) {
+    auto wnd = m_rbuf.writeWindow();
+    if (wnd.size() < atLeast) {
+        // reserve more space if needed, but error if too much space is already reserved
+        if (m_rbuf.capacity() >= MAX_BUFFER_SIZE) {
+            throw std::runtime_error("Buffer overflow: received data exceeds maximum buffer size");
+        }
+
+        m_rbuf.reserve(atLeast);
+        wnd = m_rbuf.writeWindow();
+    }
+
+    return wnd;
+}
+
 #ifdef WSX_ENABLE_TLS
 
 Result<std::shared_ptr<xtls::Context>> createContext() {

@@ -4,10 +4,6 @@
 
 #include <qsox/Resolver.hpp>
 
-// maybe make this configurable later?
-static constexpr size_t MAX_BUFFER_SIZE = 128 * 1024 * 1024;
-static constexpr size_t MAX_HANDSHAKE_SIZE = 512 * 1024;
-
 namespace wsx {
 
 Result<Client> Client::connect(std::string_view url) {
@@ -66,25 +62,15 @@ Result<Client> Client::doHandshake(std::unique_ptr<WsTransport> transport, const
     auto req = generateRequest(nonce, options);
     GEODE_UNWRAP(transport->send(req.data(), req.size()));
 
-    qn::CircularByteBuffer rbuf;
+    Client client(std::move(transport));
     size_t httpSize = 0;
 
     while (true) {
-        auto wnd = rbuf.writeWindow();
-        if (wnd.size() < 2048) {
-            // reserve more space if needed, but error if too much space is already reserved
-            if (rbuf.capacity() >= MAX_HANDSHAKE_SIZE) {
-                return Err("Handshake response is too large");
-            }
+        auto wnd = client.rwindow(4096);
+        size_t recvd = GEODE_UNWRAP(client.m_transport->receive(wnd.data(), wnd.size()));
+        client.m_rbuf.advanceWrite(recvd);
 
-            rbuf.reserve(2048);
-            wnd = rbuf.writeWindow();
-        }
-
-        size_t recvd = GEODE_UNWRAP(transport->receive(wnd.data(), wnd.size()));
-        rbuf.advanceWrite(recvd);
-
-        auto wrpread = rbuf.peek(rbuf.size());
+        auto wrpread = client.m_rbuf.peek(client.m_rbuf.size());
 
         std::string_view view{(const char*)wrpread.first.data(), wrpread.size()};
 
@@ -97,11 +83,8 @@ Result<Client> Client::doHandshake(std::unique_ptr<WsTransport> transport, const
     }
 
     std::string httpResponse(httpSize, '\0');
-    rbuf.read(httpResponse.data(), httpSize);
+    client.m_rbuf.read(httpResponse.data(), httpSize);
     GEODE_UNWRAP(parseResponse(nonce, httpResponse));
-
-    Client client(std::move(transport));
-    client.m_rbuf = std::move(rbuf);
 
     return Ok(std::move(client));
 }
@@ -154,29 +137,17 @@ Result<Message> Client::recv() {
     if (!m_transport) return Err("Connection is closed");
 
     while (true) {
-        auto res1 = _readAndReassembleMessage(m_rbuf, m_fragments);
-        if (!res1) {
+        auto res = readFromBuffer();
+        if (!res) {
             m_transport.reset();
-            return Err(std::move(res1).unwrapErr());
+            return Err(fmt::format("decoding failed: {}", std::move(res).unwrapErr()));
         }
 
-        auto res = std::move(res1).unwrap();
-        if (res) return Ok(std::move(*res));
+        auto opt = std::move(res).unwrap();
+        if (opt) return Ok(std::move(*opt));
 
-        // not enough data, read from the socket
-
-        auto wnd = m_rbuf.writeWindow();
-        if (wnd.size() < 2048) {
-            // reserve more space if needed, but error if too much space is already reserved
-            if (m_rbuf.capacity() >= MAX_BUFFER_SIZE) {
-                m_transport.reset();
-                return Err("Buffer overflow: received data exceeds maximum buffer size");
-            }
-
-            m_rbuf.reserve(2048);
-            wnd = m_rbuf.writeWindow();
-        }
-
+        // read from the socket
+        auto wnd = this->rwindow(4096);
         size_t recvd = GEODE_UNWRAP(m_transport->receive(wnd.data(), wnd.size()));
         m_rbuf.advanceWrite(recvd);
     }
@@ -187,7 +158,7 @@ Result<> Client::close(uint16_t code, std::string_view reason) {
 
     // wait for a response close frame
     while (true) {
-        auto res = recv();
+        auto res = this->recv();
         if (!res) {
             m_transport.reset();
             return Err(std::move(res).unwrapErr());
@@ -203,24 +174,14 @@ Result<> Client::close(uint16_t code, std::string_view reason) {
 }
 
 Result<> Client::closeNoAck(uint16_t code, std::string_view reason) {
-    GEODE_UNWRAP(sendCloseFrame(code, reason));
+    GEODE_UNWRAP(this->sendCloseFrame(code, reason));
     m_transport.reset();
     return Ok();
 }
 
 Result<> Client::sendCloseFrame(uint16_t code, std::string_view reason) {
     if (!m_transport) return Err("Connection is already closed");
-
-    if (reason.size() > 123) {
-        reason = reason.substr(0, 123);
-    }
-
-    std::vector<uint8_t> payload(2 + reason.size());
-    payload[0] = (code >> 8) & 0xFF;
-    payload[1] = code & 0xFF;
-    std::memcpy(payload.data() + 2, reason.data(), reason.size());
-
-    auto res = send(Message(Message::Type::Close, std::move(payload)));
+    auto res = this->send(makeCloseFrame(code, reason));
     if (!res) {
         m_transport.reset();
         return Err(fmt::format("failed to send close frame: {}", res.unwrapErr()));
@@ -229,7 +190,3 @@ Result<> Client::sendCloseFrame(uint16_t code, std::string_view reason) {
 }
 
 }
-
-// self notes:
-// * A client MUST mask all frames
-// * A client MUST close a connection if it detects a masked frame.
