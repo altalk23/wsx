@@ -2,6 +2,7 @@
 #include <random>
 #include <base64.hpp>
 #include "sha1.hpp"
+#include "utf8.h"
 
 #ifdef WSX_BUNDLE_CACERTS
 #include <ca_bundle.h>
@@ -205,6 +206,14 @@ std::span<uint8_t> ClientBase::rwindow(size_t atLeast) {
     return wnd;
 }
 
+std::pair<uint16_t, std::string_view> ClientBase::handleProtocolError(std::string_view err) {
+    if (err.contains("Invalid UTF-8")) {
+        return {1007, "Invalid UTF-8"};
+    } else {
+        return {1002, "Protocol violation"};
+    }
+}
+
 #ifdef WSX_ENABLE_TLS
 
 Result<std::shared_ptr<xtls::Context>> createContext() {
@@ -246,9 +255,7 @@ void _genrandom(void* buf, size_t size) {
 Result<> _writeMessage(qn::CircularByteBuffer& buffer, const Message& message) {
     using enum Message::Type;
 
-    if (message.isControl() && message.data().size() > 125) {
-        return Err("Control frame payload cannot be larger than 125 bytes");
-    }
+    GEODE_UNWRAP(message.validate());
 
     uint8_t header[14] = {0};
     size_t headerLen = 2;
@@ -345,6 +352,37 @@ Result<std::optional<Message>> _readOneMessage(qn::CircularByteBuffer& buffer) {
 
     uint8_t extendedPayloadLen[8] = {0};
 
+    // rsv bits must not be set
+    if (shortHeader[0] & 0x70) {
+        return Err("Received frame with non-zero RSV bits");
+    }
+
+    // control frames must have payload size <= 125
+    if ((opcode >= 0x8) && payloadLen > 125) {
+        return Err("Received control frame with payload larger than 125 bytes");
+    }
+
+    // control frames must not be fragmented
+    if ((opcode >= 0x8) && !fin) {
+        return Err("Received fragmented control frame");
+    }
+
+    Message::Type type;
+    switch (opcode) {
+        case 0x0: type = Fragment; break;
+        case 0x1: type = Text; break;
+        case 0x2: type = Binary; break;
+        case 0x8: type = Close; break;
+        case 0x9: type = Ping; break;
+        case 0xA: type = Pong; break;
+        default: return Err("Received frame with invalid opcode");
+    }
+
+    // length of close frame must be either 0 or at least 2
+    if (type == Message::Type::Close && payloadLen != 0 && payloadLen < 2) {
+        return Err("Received close frame with invalid payload length");
+    }
+
     if (payloadLen == 126) {
         headerLen += 2;
         if (buffer.size() < headerLen) {
@@ -369,17 +407,6 @@ Result<std::optional<Message>> _readOneMessage(qn::CircularByteBuffer& buffer) {
 
     if (buffer.size() < headerLen + payloadLen) {
         return Ok(std::nullopt);
-    }
-
-    Message::Type type;
-    switch (opcode) {
-        case 0x0: type = Fragment; break;
-        case 0x1: type = Text; break;
-        case 0x2: type = Binary; break;
-        case 0x8: type = Close; break;
-        case 0x9: type = Ping; break;
-        case 0xA: type = Pong; break;
-        default: return Err("Received frame with invalid opcode");
     }
 
     std::vector<uint8_t> payload(payloadLen);
@@ -414,38 +441,99 @@ static Result<Message> reassemble(std::vector<Message>& fragments) {
         auto fragdata = fragment.data();
         data.insert(data.end(), fragdata.begin(), fragdata.end());
     }
+    fragments.clear();
 
-    return Ok(Message(finalType, std::move(data)));
+    Message msg(finalType, std::move(data));
+    GEODE_UNWRAP(msg.validate());
+
+    return Ok(std::move(msg));
 }
 
 Result<std::optional<Message>> _readAndReassembleMessage(qn::CircularByteBuffer& buffer, std::vector<Message>& fragments) {
-    GEODE_UNWRAP_INTO(auto one, _readOneMessage(buffer));
+    while (true) {
+        GEODE_UNWRAP_INTO(auto one, _readOneMessage(buffer));
 
-    // need more data?
-    if (!one) return Ok(std::nullopt);
+        // need more data?
+        if (!one) return Ok(std::nullopt);
 
-    Message msg = std::move(*one);
+        Message msg = std::move(*one);
 
-    // is this a complete message that is NOT a fragment?
-    if (msg.final() && msg.type() != Message::Type::Fragment) {
-        return Ok(std::move(msg));
-    }
-
-    // is this the final fragment in a message?
-    if (msg.final() && msg.type() == Message::Type::Fragment) {
-        if (fragments.empty()) {
-            return Err("Received final fragment but no fragments have been received");
+        // server must not send a new non-control message if there are already fragments buffered
+        if (!fragments.empty() && !msg.isControl() && msg.type() != Message::Type::Fragment) {
+            return Err("Received new non-control frame while a fragmented message is incomplete");
         }
 
-        // append this fragment to the previous ones and return the complete message
+        // is this a complete message that is NOT a fragment?
+        if (msg.final() && msg.type() != Message::Type::Fragment) {
+            GEODE_UNWRAP(msg.validate());
+            return Ok(std::move(msg));
+        }
+
+        // is this the final fragment in a message?
+        if (msg.final() && msg.type() == Message::Type::Fragment) {
+            if (fragments.empty()) {
+                return Err("Received final fragment but no fragments have been received");
+            }
+
+            // append this fragment to the previous ones and return the complete message
+            fragments.push_back(std::move(msg));
+            GEODE_UNWRAP_INTO(auto complete, reassemble(fragments));
+            return Ok(std::move(complete));
+        }
+
+        // otherwise, this is either the first frame or a continuation
+        // if it is a continuation, there must be at least one previous fragment
+        if (msg.type() == Message::Type::Fragment && fragments.empty()) {
+            return Err("Received fragment but the first frame has not been received");
+        }
+
         fragments.push_back(std::move(msg));
-        GEODE_UNWRAP_INTO(auto complete, reassemble(fragments));
-        return Ok(std::move(complete));
+        continue;
+    }
+}
+
+bool isValidUtf8(std::string_view data) {
+    return isValidUtf8(std::span((const uint8_t*)data.data(), data.size()));
+}
+
+bool isValidUtf8(std::span<const uint8_t> data) {
+    return utf8::find_invalid(data.begin(), data.end()) == data.end();
+}
+
+static const auto VALID_CLOSE_CODES = std::to_array<uint16_t>({
+    1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011, 1015
+});
+
+Result<> Message::validate() const {
+    if (this->isText()) {
+        if (!isValidUtf8(this->data())) {
+            return Err("Invalid UTF-8 in text message");
+        }
+    } else if (this->isControl()) {
+        if (this->data().size() > 125) {
+            return Err("Control frame payload cannot be larger than 125 bytes");
+        }
+
+        // if this is a close frame, validate the payload
+        if (this->isClose()) {
+            if (m_data.size() == 0) return Ok();
+
+            std::span<const uint8_t> payload = this->data();
+            uint16_t code = (payload[0] << 8) | payload[1];
+            std::string_view reason((const char*)payload.data() + 2, payload.size() - 2);
+
+            if (!isValidUtf8(reason)) {
+                return Err("Invalid UTF-8 in close frame reason");
+            }
+
+            bool isRfcCode = std::find(VALID_CLOSE_CODES.begin(), VALID_CLOSE_CODES.end(), code) != VALID_CLOSE_CODES.end();
+            if (!(isRfcCode || (code >= 3000 && code <= 4999))) {
+                return Err(fmt::format("Invalid close code: {}", code));
+            }
+        }
     }
 
-    // otherwise, this is either the first frame or a continuation
-    fragments.push_back(std::move(msg));
-    return Ok(std::nullopt);
+    return Ok();
 }
 
 }

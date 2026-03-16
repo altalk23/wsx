@@ -77,6 +77,7 @@ protected:
 
     Result<std::optional<Message>> readFromBuffer();
     std::span<uint8_t> rwindow(size_t atLeast);
+    std::pair<uint16_t, std::string_view> handleProtocolError(std::string_view err);
 };
 
 #ifdef WSX_ENABLE_TLS
@@ -90,5 +91,8 @@ Result<> _writeMessage(qn::CircularByteBuffer& buffer, const Message& message);
 Result<std::optional<Message>> _readOneMessage(qn::CircularByteBuffer& buffer);
 /// Returns nullopt if more data is required. Any other error should be treated as fatal.
 Result<std::optional<Message>> _readAndReassembleMessage(qn::CircularByteBuffer& buffer, std::vector<Message>& fragments);
+
+bool isValidUtf8(std::string_view data);
+bool isValidUtf8(std::span<const uint8_t> data);
 
 }

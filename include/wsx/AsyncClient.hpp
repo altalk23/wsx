@@ -75,6 +75,7 @@ protected:
     );
 
     arc::Future<Result<>> sendCloseFrame(uint16_t code, std::string_view reason);
+    arc::Future<std::string> handleProtocolError(std::string err);
 };
 
 /// Shorthand for `AsyncClient::connect`, see that method for details and documentation.

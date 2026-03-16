@@ -1,4 +1,5 @@
 #pragma once
+#include <Geode/Result.hpp>
 #include <vector>
 #include <stdint.h>
 #include <string_view>
@@ -34,7 +35,7 @@ struct Message {
     bool isBinary() const { return m_type == Type::Binary; }
     bool isPing() const { return m_type == Type::Ping; }
     bool isPong() const { return m_type == Type::Pong; }
-    bool isControl() const { return isPing() || isPong(); }
+    bool isControl() const { return isPing() || isPong() || isClose(); }
     bool isClose() const { return m_type == Type::Close; }
 
     /// Returns the inner data, valid for all message types
@@ -79,6 +80,11 @@ struct Message {
         }
         return std::move(m_data);
     }
+
+    /// Performs certain validations and returns an error if the message is invalid. Specifically:
+    /// - check if Text frame is valid UTF-8
+    /// - check if control message payload is <= 125 bytes
+    geode::Result<> validate() const;
 
 private:
     std::vector<uint8_t> m_data;

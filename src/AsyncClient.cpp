@@ -147,8 +147,7 @@ Future<Result<Message>> AsyncClient::recv() {
     while (true) {
         auto res = readFromBuffer();
         if (!res) {
-            m_transport.reset();
-            co_return Err(fmt::format("decoding failed: {}", std::move(res).unwrapErr()));
+            co_return Err(co_await this->handleProtocolError(std::move(res).unwrapErr()));
         }
 
         auto opt = std::move(res).unwrap();
@@ -156,6 +155,14 @@ Future<Result<Message>> AsyncClient::recv() {
             if (opt->isClose()) {
                 GEODE_CO_UNWRAP(co_await this->sendCloseFrame(1000, ""));
                 m_transport.reset();
+            } else if (opt->isPing()) {
+                // send a pong message
+                Message msg(Message::Type::Pong, std::move(*opt).data());
+                GEODE_CO_UNWRAP(co_await this->send(std::move(msg)));
+                continue;
+            } else if (opt->isPong()) {
+                // ignore
+                continue;
             }
 
             co_return Ok(std::move(*opt));
@@ -203,6 +210,20 @@ Future<Result<>> AsyncClient::sendCloseFrame(uint16_t code, std::string_view rea
     }
     co_return Ok();
 }
+
+Future<std::string> AsyncClient::handleProtocolError(std::string err) {
+    // send a close frame
+    if (m_transport) {
+        auto [code, reason] = ClientBase::handleProtocolError(err);
+        auto res = co_await this->closeNoAck(code, reason);
+        if (!res) {
+            co_return fmt::format("Protocol error: {}. Sending a close frame also failed: {}", err, res.unwrapErr());
+        }
+        co_return fmt::format("Protocol violation by the server: {}", err);
+    }
+    co_return err;
+}
+
 
 }
 

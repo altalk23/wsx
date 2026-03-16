@@ -139,8 +139,7 @@ Result<Message> Client::recv() {
     while (true) {
         auto res = readFromBuffer();
         if (!res) {
-            m_transport.reset();
-            return Err(fmt::format("decoding failed: {}", std::move(res).unwrapErr()));
+            return Err(this->handleProtocolError(std::move(res).unwrapErr()));
         }
 
         auto opt = std::move(res).unwrap();
@@ -148,6 +147,14 @@ Result<Message> Client::recv() {
             if (opt->isClose()) {
                 GEODE_UNWRAP(this->sendCloseFrame(1000, ""));
                 m_transport.reset();
+            } else if (opt->isPing()) {
+                // send a pong message
+                Message msg(Message::Type::Pong, std::move(*opt).data());
+                GEODE_UNWRAP(this->send(std::move(msg)));
+                continue;
+            } else if (opt->isPong()) {
+                // ignore
+                continue;
             }
 
             return Ok(std::move(*opt));
@@ -194,6 +201,19 @@ Result<> Client::sendCloseFrame(uint16_t code, std::string_view reason) {
         return Err(fmt::format("failed to send close frame: {}", res.unwrapErr()));
     }
     return Ok();
+}
+
+std::string Client::handleProtocolError(std::string err) {
+    // send a close frame
+    if (m_transport) {
+        auto [code, reason] = ClientBase::handleProtocolError(err);
+        auto res = this->closeNoAck(code, reason);
+        if (!res) {
+            return fmt::format("Protocol error: {}. Sending a close frame also failed: {}", err, res.unwrapErr());
+        }
+        return fmt::format("Protocol violation by the server: {}", err);
+    }
+    return err;
 }
 
 }

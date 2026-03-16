@@ -17,7 +17,12 @@ Future<Result<>> runCase(std::string url, int i) {
     GEODE_CO_UNWRAP_INTO(auto client, std::move(res));
 
     while (true) {
-        GEODE_CO_UNWRAP_INTO(auto msg, co_await client.recv());
+        auto res = co_await client.recv();
+        if (!res) {
+            fmt::println("Receive failed: {}", res.unwrapErr());
+            break;
+        }
+        auto msg = std::move(res).unwrap();
 
         if (msg.isText()) {
             GEODE_CO_UNWRAP(co_await client.send(msg.text()));
@@ -41,17 +46,32 @@ Future<Result<>> asyncMain(int argc, const char** argv) {
         url = argv[1];
     }
 
+    int specificCase = -1;
+    if (argc > 2) {
+        specificCase = std::atoi(argv[2]);
+    }
+
     for (int i = 1; i <= 247; i++) {
+        if (specificCase != -1 && i != specificCase) {
+            continue;
+        }
+
         std::println("Running case {}...", i);
         auto res = co_await runCase(url, i);
 
         if (!res) {
             std::println("Case {} failed: {}", i, res.unwrapErr());
-            break;
         } else {
             std::println("Case {} passed", i);
         }
     }
+
+    std::string updateUrl = fmt::format("{}/updateReports?agent=wsx", url);
+    auto updateRes = (co_await wsx::connectAsync(updateUrl)).mapErr([](auto&& err) {
+        return fmt::format("Connection failed: {}", err);
+    });
+    GEODE_CO_UNWRAP_INTO(auto updateClient, std::move(updateRes));
+    GEODE_CO_UNWRAP(co_await updateClient.close());
 
     co_return Ok();
 }

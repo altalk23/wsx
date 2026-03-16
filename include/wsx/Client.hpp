@@ -73,6 +73,7 @@ protected:
     );
 
     Result<> sendCloseFrame(uint16_t code, std::string_view reason);
+    std::string handleProtocolError(std::string err);
 };
 
 /// Shorthand for `Client::connect`, see that method for details and documentation.
