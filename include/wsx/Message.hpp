@@ -86,7 +86,7 @@ struct Message {
             throw std::runtime_error("Message is not close");
         }
         if (m_data.size() < 2) {
-            throw std::runtime_error("Not enough data for the close code");
+            return 0;
         }
         return uint16_t(m_data[0] << 8) + m_data[1];
     }
@@ -96,7 +96,7 @@ struct Message {
             throw std::runtime_error("Message is not close");
         }
         if (m_data.size() < 2) {
-            throw std::runtime_error("Not enough data for the close reason");
+            return "";
         }
         return std::string_view((const char*)m_data.data() + 2, m_data.size() - 2);
     }
